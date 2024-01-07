@@ -1,0 +1,96 @@
+name: boost bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      distinct_id:
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        type: boolean
+      retries:
+        description: "Number of rerun retries"
+        required: true
+        default: "1"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          [
+            1_63_0,
+            1_64_0,
+            1_65_0,
+            1_65_1,
+            1_66_0,
+            1_67_0,
+            1_68_0,
+            1_69_0,
+            1_70_0,
+            1_71_0,
+            1_72_0,
+            1_73_0,
+            1_74_0,
+            1_75_0,
+            1_76_0,
+            1_77_0,
+            1_78_0,
+            1_79_0,
+            1_80_0,
+            1_81_0,
+            1_82_0,
+            1_83_0,
+            1_84_0,
+          ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download
+        run: |
+          assets="${{ matrix.version }}"
+          url="https://archives.boost.io/release/${assets//_/.}/source"
+
+          curl -sLZ ${url}/boost_${assets}.7z -o boost_${assets}.7z \
+            ${url}/boost_${assets}.7z.json -o boost_${assets}.7z.json \
+            ${url}/boost_${assets}.tar.bz2 -o boost_${assets}.tar.bz2 \
+            ${url}/boost_${assets}.tar.bz2.json -o boost_${assets}.tar.bz2.json \
+            ${url}/boost_${assets}.tar.gz -o boost_${assets}.tar.gz \
+            ${url}/boost_${assets}.tar.gz.json -o boost_${assets}.tar.gz.json \
+            ${url}/boost_${assets}.zip -o boost_${assets}.zip \
+            ${url}/boost_${assets}.zip.json -o boost_${assets}.zip.json
+
+      - name: Create release
+        run: |
+          github_tag="${{ matrix.version }}"
+          gh release create "boost-${github_tag//_/.}" ./boost_* --title "boost-${github_tag//_/.}" --notes "Boost ${github_tag//_/.} release mirror" --latest
+
+  rerun-on-failure:
+    if: failure() && inputs.skip_rerun == '0'
+    name: rerun-on-failure
+    needs: bootstrap
+    permissions:
+      actions: write
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger rerun workflow on job failures
+        run: |
+          inputs_retries="${{ inputs.retries }}"
+          gh workflow run rerun.yml -f run_id=${{ github.run_id }} -f attempts=${{ github.run_attempt }} -f retries=${inputs_retries:-1}
