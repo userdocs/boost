@@ -1,0 +1,140 @@
+name: boost mirror bootstrap source files
+
+# credits: https://www.kenmuse.com/blog/dynamic-build-matrices-in-github-actions/
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tool:
+        description: "Use action over cli?"
+        required: true
+        type: boolean
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        type: boolean
+      retries:
+        description: "Number of rerun retries"
+        required: true
+        default: "1"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap-matrix:
+    name: bootstrap the matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix-array: ${{ steps.latest-release.outputs.matrix-array }}
+      latest-release: ${{ steps.latest-release.outputs.latest-release }}
+    steps:
+      - name: bootstrap the matrix
+        id: latest-release
+        run: |
+          latest_release_remote="$(git ls-remote -q -t --refs https://github.com/boostorg/boost.git | awk '{sub("refs/tags/boost-", "");sub("(.*)(rc|alpha|beta|-bgl)(.*)", ""); print $2 }' | awk '!/^$/' | sort -rV | head -n1 | cut -d'.' -f 2)"
+
+          for (( b=63; b<=$latest_release_remote; b++ ))
+          do
+              latest_release_array+=("1.$b.0")
+          done
+
+          echo "latest-release=1.${latest_release_remote}.0" >> "$GITHUB_OUTPUT"
+          echo "matrix-array=$(jq -cn --argjson environments '['$(printf '"%s",' "${latest_release_array[@]}" | sed -r 's|,$||')']' '{version: $environments}')" >> $GITHUB_OUTPUT
+
+  bootstrap-boost:
+    name: bootstrap boost
+    needs: [bootstrap-matrix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      latest-release: ${{needs.bootstrap-matrix.outputs.latest-release}}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.bootstrap-matrix.outputs.matrix-array) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download boost assets for ${{ matrix.version }}
+        run: |
+          boost_version="${{ matrix.version }}"
+
+          if curl -sfLI "https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
+            boost_url="https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/source"
+          elif curl -sfLI "https://archives.boost.io/release/${boost_version}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
+            boost_url="https://archives.boost.io/release/${boost_version}/source"
+          fi
+
+          mkdir -p assets
+
+          curl -sLZ ${boost_url}/boost_${boost_version//./_}.7z -o assets/boost_${boost_version//./_}.7z \
+            ${boost_url}/boost_${boost_version//./_}.7z.json -o assets/boost_${boost_version//./_}.7z.json \
+            ${boost_url}/boost_${boost_version//./_}.tar.bz2 -o assets/boost_${boost_version//./_}.tar.bz2 \
+            ${boost_url}/boost_${boost_version//./_}.tar.bz2.json -o assets/boost_${boost_version//./_}.tar.bz2.json \
+            ${boost_url}/boost_${boost_version//./_}.tar.gz -o assets/boost_${boost_version//./_}.tar.gz \
+            ${boost_url}/boost_${boost_version//./_}.tar.gz.json -o assets/boost_${boost_version//./_}.tar.gz.json \
+            ${boost_url}/boost_${boost_version//./_}.zip -o assets/boost_${boost_version//./_}.zip \
+            ${boost_url}/boost_${boost_version//./_}.zip.json -o assets/boost_${boost_version//./_}.zip.json
+
+      - name: Create release for ${{ matrix.version }} using gh-cli
+        if: inputs.release_tool == '0'
+        run: |
+          if ! gh release view "boost-${{ matrix.version }}" &>/dev/null; then
+              gh release create "boost-${{ matrix.version }}" ./assets/* --title "boost-${{ matrix.version }}" --notes "Boost ${{ matrix.version }} release mirror"
+          else
+              gh release upload "boost-${{ matrix.version }}" ./assets/* --clobber
+          fi
+
+      - name: Create release for ${{ matrix.version }} using ncipollo/release-action
+        if: inputs.release_tool == '1'
+        uses: ncipollo/release-action@v1
+        with:
+          prerelease: false
+          artifacts: ./assets/*
+          replacesArtifacts: true
+          tag: "boost-${{ matrix.version }}"
+          name: "boost-${{ matrix.version }}"
+          body: "Boost ${{ matrix.version }} release mirror"
+          allowUpdates: true
+          token: ${{ secrets.BOOST }}
+
+  set-latest-release:
+    name: Set latest release
+    needs: [bootstrap-matrix, bootstrap-boost]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      latest-release: ${{needs.bootstrap-matrix.outputs.latest-release}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set boost 1.${{ env.latest-release }}.0 at latest release
+        run: |
+          github_tag="${{ env.latest-release }}"
+          gh release edit "boost-${github_tag}" --latest
+
+  rerun-on-failure:
+    if: failure() && inputs.skip_rerun == '0'
+    name: rerun-on-failure
+    needs: set-latest-release
+    permissions:
+      actions: write
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger rerun workflow on job failures
+        run: |
+          inputs_retries="${{ inputs.retries }}"
+          gh workflow run rerun.yml -f run_id=${{ github.run_id }} -f attempts=${{ github.run_attempt }} -f retries=${inputs_retries:-1}

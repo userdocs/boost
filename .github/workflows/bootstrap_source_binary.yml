@@ -1,0 +1,147 @@
+name: boost mirror bootstrap source and binary files
+
+# credits: https://www.kenmuse.com/blog/dynamic-build-matrices-in-github-actions/
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tool:
+        description: "Use action over cli?"
+        required: true
+        type: boolean
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        type: boolean
+      retries:
+        description: "Number of rerun retries"
+        required: true
+        default: "1"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap-matrix:
+    name: bootstrap the matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix-array: ${{ steps.latest-release.outputs.matrix-array }}
+      latest-release: ${{ steps.latest-release.outputs.latest-release }}
+    steps:
+      - name: bootstrap the matrix
+        id: latest-release
+        run: |
+          latest_release_remote="$(git ls-remote -q -t --refs https://github.com/boostorg/boost.git | awk '{sub("refs/tags/boost-", "");sub("(.*)(rc|alpha|beta|-bgl)(.*)", ""); print $2 }' | awk '!/^$/' | sort -rV | head -n1 | cut -d'.' -f 2)"
+
+          for (( b=63; b<=$latest_release_remote; b++ ))
+          do
+              latest_release_array+=("1.$b.0")
+          done
+
+          echo "latest-release=1.${latest_release_remote}.0" >> "$GITHUB_OUTPUT"
+          echo "matrix-array=$(jq -cn --argjson environments '['$(printf '"%s",' "${latest_release_array[@]}" | sed -r 's|,$||')']' '{version: $environments}')" >> $GITHUB_OUTPUT
+
+  bootstrap-boost:
+    name: bootstrap boost
+    needs: [bootstrap-matrix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.BOOST }}
+      latest-release: ${{needs.bootstrap-matrix.outputs.latest-release}}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.bootstrap-matrix.outputs.matrix-array) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap boost assets for ${{ matrix.version }}
+        run: |
+          boost_version="${{ matrix.version }}"
+
+          if curl -sfLI "https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
+            boost_url="https://boostorg.jfrog.io/artifactory/main/release/${boost_version}"
+          elif curl -sfLI "https://archives.boost.io/release/${boost_version}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
+            boost_url="https://archives.boost.io/release/${boost_version}"
+          fi
+
+          touch assets.sh && chmod 700 assets.sh && mkdir -p assets
+
+          mapfile -t assets_source < <(curl -sL https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/source/ | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+          mapfile -t assets_binaries < <(curl -sL https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/binaries/ | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+
+            for assets_s in "${!assets_source[@]}"; do
+                [[ "$assets_s" -eq "0" ]] && printf '%s\n' "curl -sLZ ${boost_url}/source/${assets_source[$assets_s]} -o assets/${assets_source[$assets_s]} \\" > assets.sh
+                [[ "$assets_s" -gt "0" ]] && printf '%s\n' "${boost_url}/source/${assets_source[$assets_s]} -o assets/${assets_source[$assets_s]} \\" >> assets.sh
+            done
+
+            for assets_b in "${!assets_binaries[@]}"; do
+                [[ "$assets_b" -lt "$((${#assets_binaries[@]} - 1))" ]] && printf '%s\n' "${boost_url}/binaries/${assets_binaries[$assets_b]} -o assets/${assets_binaries[$assets_b]} \\" >> assets.sh
+                [[ "$assets_b" -eq "$((${#assets_binaries[@]} - 1))" ]] && printf '%s\n' "${boost_url}/binaries/${assets_binaries[$assets_b]} -o assets/${assets_binaries[$assets_b]}" >> assets.sh
+            done
+
+      - name: Download boost assets for ${{ matrix.version }}
+        run: ./assets.sh
+
+      - name: Create release for ${{ matrix.version }} using gh-cli
+        if: inputs.release_tool == '0'
+        run: |
+          if ! gh release view "boost-${{ matrix.version }}" &>/dev/null; then
+              gh release create "boost-${{ matrix.version }}" ./assets/* --title "boost-${{ matrix.version }}" --notes "Boost ${{ matrix.version }} release mirror"
+          else
+              gh release upload "boost-${{ matrix.version }}" ./assets/* --clobber
+          fi
+
+      - name: Create release for ${{ matrix.version }} using ncipollo/release-action
+        if: inputs.release_tool == '1'
+        uses: ncipollo/release-action@v1
+        with:
+          prerelease: false
+          artifacts: ./assets/*
+          replacesArtifacts: true
+          tag: "boost-${{ matrix.version }}"
+          name: "boost-${{ matrix.version }}"
+          body: "Boost ${{ matrix.version }} release mirror"
+          allowUpdates: true
+          token: ${{ secrets.BOOST }}
+
+  set-latest-release:
+    name: Set latest release
+    needs: [bootstrap-matrix, bootstrap-boost]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.BOOST }}
+      latest-release: ${{needs.bootstrap-matrix.outputs.latest-release}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set boost 1.${{ env.latest-release }}.0 at latest release
+        run: |
+          github_tag="${{ env.latest-release }}"
+          gh release edit "boost-${github_tag}" --latest
+
+  rerun-on-failure:
+    if: failure() && inputs.skip_rerun == '0'
+    name: rerun-on-failure
+    needs: set-latest-release
+    permissions:
+      actions: write
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.BOOST }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger rerun workflow on job failures
+        run: |
+          inputs_retries="${{ inputs.retries }}"
+          gh workflow run rerun.yml -f run_id=${{ github.run_id }} -f attempts=${{ github.run_attempt }} -f retries=${inputs_retries:-1}
