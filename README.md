@@ -32,6 +32,8 @@ check_new_release_source_binary.yml (pair 2)
 > [!CAUTION]
 > The `source` and `binary` workflows will not work with just the `github.token` and need a PAT created with minimal permissions to overcome api rate limiting.
 > It takes just around 5 minutes to bootstrap this and involves some large files.
+>
+> In the repository settings, create a repository secret, called `BOOST`, with the token created. The workflows are already prepped to use this `${{ secrets.BOOST }}`
 
 Finally, you have the corresponding automated check release workflows which will create new releases in the same format as the selected bootstrap workflow.
 
