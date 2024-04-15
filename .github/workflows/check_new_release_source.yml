@@ -7,16 +7,23 @@ on:
         description: "Use action over cli?"
         required: true
         type: boolean
+        default: false
       skip_rerun:
         description: "Skip rerun?"
         required: true
         type: boolean
+        default: true
       retries:
         description: "Number of rerun retries"
         required: true
         default: "1"
         type: choice
         options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+      update_latest_release:
+        description: "Update latest release?"
+        required: true
+        type: boolean
+        default: false
   # schedule:
   #   - cron: "*/30 */1 * * *"
 
@@ -78,6 +85,10 @@ jobs:
             printf "%-14s latest-boost:%-10s mirror-boost:%-10s\n" "$iray" "${{ env.upstream_boost_tag }}" "${{ env.local_boost_tag }}"
           fi
 
+          if [[ "${{ inputs.update_latest_release }}" == 'true' ]]; then
+            echo "continue_build=yes" >> $GITHUB_ENV
+          fi
+
           echo "continue_build=${{ env.continue_build }}" >> $GITHUB_OUTPUT
 
       - name: Download assets for boost-${{ env.upstream_boost_tag }}
@@ -102,25 +113,25 @@ jobs:
             ${boost_url}/boost_${boost_version//./_}.zip -o assets/boost_${boost_version//./_}.zip \
             ${boost_url}/boost_${boost_version//./_}.zip.json -o assets/boost_${boost_version//./_}.zip.json
 
-      - name: Create release for {{ env.upstream_boost_tag }} using gh-cli
+      - name: Create release for ${{ env.upstream_boost_tag }} using gh-cli
         if: env.continue_build == 'yes' && inputs.release_tool == '0'
         run: |
-          if ! gh release view "boost-{{ env.upstream_boost_tag }}" &>/dev/null; then
-              gh release create "boost-{{ env.upstream_boost_tag }}" ./assets/* --title "boost-{{ env.upstream_boost_tag }}" --notes "Boost {{ env.upstream_boost_tag }} release mirror"
+          if ! gh release view "boost-${{ env.upstream_boost_tag }}" &>/dev/null; then
+              gh release create "boost-${{ env.upstream_boost_tag }}" ./assets/* --title "boost-${{ env.upstream_boost_tag }}" --notes "Boost ${{ env.upstream_boost_tag }} release mirror"
           else
-              gh release upload "boost-{{ env.upstream_boost_tag }}" ./assets/* --clobber
+              gh release upload "boost-${{ env.upstream_boost_tag }}" ./assets/* --clobber
           fi
 
-      - name: Create release for {{ env.upstream_boost_tag }} using ncipollo/release-action
+      - name: Create release for ${{ env.upstream_boost_tag }} using ncipollo/release-action
         if: env.continue_build == inputs.release_tool == '1'
         uses: ncipollo/release-action@v1
         with:
           prerelease: false
           artifacts: ./assets/*
           replacesArtifacts: true
-          tag: "boost-{{ env.upstream_boost_tag }}"
-          name: "boost-{{ env.upstream_boost_tag }}"
-          body: "Boost {{ env.upstream_boost_tag }} release mirror"
+          tag: "boost-${{ env.upstream_boost_tag }}"
+          name: "boost-${{ env.upstream_boost_tag }}"
+          body: "Boost ${{ env.upstream_boost_tag }} release mirror"
           allowUpdates: true
           token: ${{ github.token }}
 
