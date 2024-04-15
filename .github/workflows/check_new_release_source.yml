@@ -102,25 +102,25 @@ jobs:
             ${boost_url}/boost_${boost_version//./_}.zip -o assets/boost_${boost_version//./_}.zip \
             ${boost_url}/boost_${boost_version//./_}.zip.json -o assets/boost_${boost_version//./_}.zip.json
 
-      - name: Create release for {{ env.upstream_boost_tag }} using gh-cli
+      - name: Create release for ${{ env.upstream_boost_tag }} using gh-cli
         if: env.continue_build == 'yes' && inputs.release_tool == '0'
         run: |
-          if ! gh release view "boost-{{ env.upstream_boost_tag }}" &>/dev/null; then
-              gh release create "boost-{{ env.upstream_boost_tag }}" ./assets/* --title "boost-{{ env.upstream_boost_tag }}" --notes "Boost {{ env.upstream_boost_tag }} release mirror"
+          if ! gh release view "boost-${{ env.upstream_boost_tag }}" &>/dev/null; then
+              gh release create "boost-${{ env.upstream_boost_tag }}" ./assets/* --title "boost-${{ env.upstream_boost_tag }}" --notes "Boost ${{ env.upstream_boost_tag }} release mirror"
           else
-              gh release upload "boost-{{ env.upstream_boost_tag }}" ./assets/* --clobber
+              gh release upload "boost-${{ env.upstream_boost_tag }}" ./assets/* --clobber
           fi
 
-      - name: Create release for {{ env.upstream_boost_tag }} using ncipollo/release-action
+      - name: Create release for ${{ env.upstream_boost_tag }} using ncipollo/release-action
         if: env.continue_build == inputs.release_tool == '1'
         uses: ncipollo/release-action@v1
         with:
           prerelease: false
           artifacts: ./assets/*
           replacesArtifacts: true
-          tag: "boost-{{ env.upstream_boost_tag }}"
-          name: "boost-{{ env.upstream_boost_tag }}"
-          body: "Boost {{ env.upstream_boost_tag }} release mirror"
+          tag: "boost-${{ env.upstream_boost_tag }}"
+          name: "boost-${{ env.upstream_boost_tag }}"
+          body: "Boost ${{ env.upstream_boost_tag }} release mirror"
           allowUpdates: true
           token: ${{ github.token }}
 
