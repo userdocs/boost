@@ -104,8 +104,8 @@ jobs:
 
           touch assets.sh && chmod 700 assets.sh && mkdir -p assets
 
-          mapfile -t assets_source < <(curl -sL https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/source/ | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
-          mapfile -t assets_binaries < <(curl -sL https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/binaries/ | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+          mapfile -t assets_source < <(curl -sL ${boost_url}/source/ | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+          mapfile -t assets_binaries < <(curl -sL ${boost_url}/binaries/ | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
 
             for assets_s in "${!assets_source[@]}"; do
                 [[ "$assets_s" -eq "0" ]] && printf '%s\n' "curl -sLZ ${boost_url}/source/${assets_source[$assets_s]} -o assets/${assets_source[$assets_s]} \\" > assets.sh
