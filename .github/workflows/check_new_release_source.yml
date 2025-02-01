@@ -27,8 +27,7 @@ on:
   # schedule:
   #   - cron: "*/30 */1 * * *"
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   skip_duplicate_job:
@@ -50,19 +49,32 @@ jobs:
     outputs:
       continue_build: ${{ steps.continue_build.outputs.continue_build }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     name: "Check for latest boost tags"
     env:
       continue_build: "no"
       GH_TOKEN: ${{ github.token }}
+      update_latest_release: ${{ inputs.update_latest_release }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Docker - Bootstrap the boost files
+        id: boost_version_info
+        uses: userdocs/actions/boost@main
+        with:
+          boost_version: ""
+          download_archive: false
+          extract_archive: false
 
       - name: Get latest boostorg/boost tag
-        run: |
-          upstream_boost_tag="$(git ls-remote -q -t --refs "https://github.com/boostorg/boost.git" | awk '{sub("refs/tags/", "");sub("(.*)(rc|alpha|beta|-bgl)(.*)", ""); print $2 }' | awk '!/^$/' | sort -rV | head -n 1)"
-          echo "upstream_boost_tag=${upstream_boost_tag/boost-}" >> $GITHUB_ENV
+        env:
+          BOOST_VERSION: ${{ steps.boost_version_info.outputs.BOOST_VERSION }}
+        run: echo "upstream_boost_version=${BOOST_VERSION}" >> $GITHUB_ENV
 
       - name: Get latest userdocs/boost tag
         run: |
@@ -78,28 +90,29 @@ jobs:
             printf "%d%03d%03d%03d" "${test_array[@]}"
           }
 
-          if [[ "$(ver "${{ env.upstream_boost_tag }}")" -gt "$(ver "${{ env.local_boost_tag }}")" ]]; then
-            printf "%-14s latest-boost:%-10s mirror-boost:%-10s %s\n" "$iray" "${{ env.upstream_boost_tag }}" "${{ env.local_boost_tag }}" "< New version available - workflow will be triggered"
+          if [[ "$(ver "${upstream_boost_version}")" -gt "$(ver "${local_boost_tag}")" ]]; then
+            printf "%-14s latest-boost:%-10s mirror-boost:%-10s %s\n" "$iray" "${upstream_boost_version}" "${local_boost_tag}" "< New version available - workflow will be triggered"
             echo "continue_build=yes" >> $GITHUB_ENV
           else
-            printf "%-14s latest-boost:%-10s mirror-boost:%-10s\n" "$iray" "${{ env.upstream_boost_tag }}" "${{ env.local_boost_tag }}"
+            printf "%-14s latest-boost:%-10s mirror-boost:%-10s\n" "$iray" "${upstream_boost_version}" "${local_boost_tag}"
           fi
 
-          if [[ "${{ inputs.update_latest_release }}" == 'true' ]]; then
+          if [[ "${update_latest_release}" == 'true' ]]; then
             echo "continue_build=yes" >> $GITHUB_ENV
           fi
 
-          echo "continue_build=${{ env.continue_build }}" >> $GITHUB_OUTPUT
+          echo "continue_build=${continue_build}" >> $GITHUB_OUTPUT
 
-      - name: Download assets for boost-${{ env.upstream_boost_tag }}
+      - name: Download assets for boost-${{ env.upstream_boost_version }}
         if: env.continue_build == 'yes'
         run: |
-          boost_version="${{ env.upstream_boost_tag }}"
+          boost_version="${upstream_boost_version}"
 
-          if curl -sfLI "https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
-            boost_url="https://boostorg.jfrog.io/artifactory/main/release/${boost_version}/source"
-          elif curl -sfLI "https://archives.boost.io/release/${boost_version}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
-            boost_url="https://archives.boost.io/release/${boost_version}/source"
+          if curl -sfLI "https://archives.boost.io/release/${boost_version}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
+            boost_url="https://archives.boost.io/release/${boost_version}"
+          else
+            printf "%s\n" "archives.boost.io URL not working for ${boost_version}"
+            exit 1
           fi
 
           mkdir -p assets
@@ -113,40 +126,52 @@ jobs:
             ${boost_url}/boost_${boost_version//./_}.zip -o assets/boost_${boost_version//./_}.zip \
             ${boost_url}/boost_${boost_version//./_}.zip.json -o assets/boost_${boost_version//./_}.zip.json
 
-      - name: Create release for ${{ env.upstream_boost_tag }} using gh-cli
+      - name: Create release for ${{ env.upstream_boost_version }} using gh-cli
         if: env.continue_build == 'yes' && inputs.release_tool == '0'
         run: |
-          if ! gh release view "boost-${{ env.upstream_boost_tag }}" &>/dev/null; then
-              gh release create "boost-${{ env.upstream_boost_tag }}" ./assets/* --title "boost-${{ env.upstream_boost_tag }}" --notes "Boost ${{ env.upstream_boost_tag }} release mirror"
+          if ! gh release view "boost-${upstream_boost_version}" &>/dev/null; then
+              gh release create "boost-${upstream_boost_version}" ./assets/* --title "boost-${upstream_boost_version}" --notes "Boost ${upstream_boost_version} release mirror"
           else
-              gh release upload "boost-${{ env.upstream_boost_tag }}" ./assets/* --clobber
+              gh release upload "boost-${upstream_boost_version}" ./assets/* --clobber
           fi
 
-      - name: Create release for ${{ env.upstream_boost_tag }} using ncipollo/release-action
+      - name: Create release for ${{ env.upstream_boost_version }} using ncipollo/release-action
         if: env.continue_build == inputs.release_tool == '1'
         uses: ncipollo/release-action@v1
         with:
           prerelease: false
           artifacts: ./assets/*
           replacesArtifacts: true
-          tag: "boost-${{ env.upstream_boost_tag }}"
-          name: "boost-${{ env.upstream_boost_tag }}"
-          body: "Boost ${{ env.upstream_boost_tag }} release mirror"
+          tag: "boost-${{ env.upstream_boost_version }}"
+          name: "boost-${{ env.upstream_boost_version }}"
+          body: "Boost ${{ env.upstream_boost_version }} release mirror"
           allowUpdates: true
           token: ${{ github.token }}
 
-  rerun-on-failure:
-    if: failure() && inputs.skip_rerun == '0'
-    name: rerun-on-failure
-    needs: check_release
+  ci-auto-rerun-failed-jobs:
+    if: failure() && (github.event.inputs.skip_rerun || 'false') == 'false'
+    needs: [check_release]
+    concurrency:
+      group: ci-auto-rerun-failed-jobs
+      cancel-in-progress: true
     permissions:
       actions: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     env:
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: "${{ secrets.AUTO_RERUN || github.token }}"
+      github_repo: "" # To use ci-auto-rerun-failed-jobs.yml hosted in a remote repository else default to the current repository. Requires PAT token AUTO_RERUN
+      retries: ${{ github.event.inputs.retries || '1' }}
+      distinct_id: ${{ github.event.inputs.distinct_id }}
     steps:
       - uses: actions/checkout@v4
-      - name: Trigger rerun workflow on job failures
-        run: |
-          inputs_retries="${{ inputs.retries }}"
-          gh workflow run rerun.yml -f run_id=${{ github.run_id }} -f attempts=${{ github.run_attempt }} -f retries=${inputs_retries:-1}
+        with:
+          persist-credentials: false
+      - name: ci-auto-rerun-failed-jobs via ${{ env.github_repo || github.repository }}
+        run: >
+          gh workflow run ci-auto-rerun-failed-jobs-action.yml
+          --repo "${github_repo:-$GITHUB_REPOSITORY}"
+          -f github_repo=${GITHUB_REPOSITORY}
+          -f run_id=${GITHUB_RUN_ID}
+          -f attempts=${GITHUB_RUN_ATTEMPT}
+          -f retries=${retries}
+          -f distinct_id=${distinct_id}
