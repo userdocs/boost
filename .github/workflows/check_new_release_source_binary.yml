@@ -36,7 +36,7 @@ jobs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
     steps:
       - id: skip_check
-        uses: fkirc/skip-duplicate-actions@v5
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5
         with:
           concurrent_skipping: "always"
           cancel_others: "false"
@@ -149,7 +149,7 @@ jobs:
 
       - name: Create release for ${{ env.upstream_boost_version }} using ncipollo/release-action
         if: env.continue_build == inputs.release_tool == '1'
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@bcfe5470707e8832e12347755757cec0eb3c22af # v1
         with:
           prerelease: false
           artifacts: ./assets/*
