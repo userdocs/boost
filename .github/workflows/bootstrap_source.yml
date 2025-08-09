@@ -105,7 +105,7 @@ jobs:
 
       - name: Create release for ${{ matrix.version }} using ncipollo/release-action
         if: inputs.release_tool == '1'
-        uses: ncipollo/release-action@bcfe5470707e8832e12347755757cec0eb3c22af # v1
+        uses: ncipollo/release-action@bcfe5470707e8832e12347755757cec0eb3c22af # v1.18.0
         with:
           prerelease: false
           artifacts: ./assets/*
