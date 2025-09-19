@@ -65,7 +65,7 @@ jobs:
 
       - name: Docker - Bootstrap the boost files
         id: boost_version_info
-        uses: userdocs/actions/boost@749d0010d8abde6c8a8ffc720856de5e799bdfea # v1.0.2
+        uses: userdocs/actions/boost@e8f57bd585c7bb6dcce011694d6772bab657abca # v1.0.7
         with:
           boost_version: ""
           download_archive: false
@@ -149,7 +149,7 @@ jobs:
 
       - name: Create release for ${{ env.upstream_boost_version }} using ncipollo/release-action
         if: env.continue_build == inputs.release_tool == '1'
-        uses: ncipollo/release-action@bcfe5470707e8832e12347755757cec0eb3c22af # v1.18.0
+        uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # v1.20.0
         with:
           prerelease: false
           artifacts: ./assets/*
