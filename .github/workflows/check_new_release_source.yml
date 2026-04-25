@@ -88,7 +88,9 @@ jobs:
         run: |
           ver() {
             local test_array
-            read -ra test_array < <(printf "%s" "${@//./ }")
+            local clean_ver="${1%%-*}"
+            clean_ver="${clean_ver%%+*}"
+            read -ra test_array < <(printf "%s" "${clean_ver//./ }")
             printf "%d%03d%03d%03d" "${test_array[@]}"
           }
 
