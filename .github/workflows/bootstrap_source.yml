@@ -39,7 +39,7 @@ jobs:
       - name: bootstrap the matrix
         id: latest-release
         run: |
-          latest_release_remote="$(git ls-remote -q -t --refs https://github.com/boostorg/boost.git | awk '{sub("refs/tags/boost-", "");sub("(.*)(rc|alpha|beta|-bgl)(.*)", ""); print $2 }' | awk '!/^$/' | sort -rV | head -n1 | cut -d'.' -f 2)"
+          latest_release_remote="$(git ls-remote -q -t --refs https://github.com/boostorg/boost.git | awk '$2 ~ /^refs\/tags\/boost-[0-9]+\.[0-9]+\.[0-9]+$/ { sub("refs/tags/boost-", "", $2); print $2 }' | sort -rV | head -n1 | cut -d'.' -f 2)"
 
           for (( b=63; b<=$latest_release_remote; b++ ))
           do

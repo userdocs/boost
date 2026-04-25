@@ -78,7 +78,7 @@ jobs:
 
       - name: Get latest userdocs/boost tag
         run: |
-          local_boost_tag="$(git ls-remote -q -t --refs "https://github.com/userdocs/boost" | awk '{sub("refs/tags/", "");sub("(.*)(rc|alpha|beta|-bgl)(.*)", ""); print $2 }' | awk '!/^$/' | sort -rV | head -n1)"
+          local_boost_tag="$(git ls-remote -q -t --refs "https://github.com/userdocs/boost" | awk '$2 ~ /^refs\/tags\/boost-[0-9]+\.[0-9]+\.[0-9]+$/ { sub("refs/tags/boost-", "", $2); print $2 }' | sort -rV | head -n1)"
           echo "local_boost_tag=${local_boost_tag/boost-}" >> $GITHUB_ENV
 
       - name: Test values - latest upstream vs local tags
