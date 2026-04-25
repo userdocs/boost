@@ -83,6 +83,8 @@ jobs:
 
       - name: Test values - latest upstream vs local tags
         id: continue_build
+        env:
+          BOOST_ASSETS_FOUND: ${{ steps.boost_version_info.outputs.BOOST_ASSETS_FOUND }}
         run: |
           ver() {
             local test_array
@@ -90,14 +92,19 @@ jobs:
             printf "%d%03d%03d%03d" "${test_array[@]}"
           }
 
-          if [[ "$(ver "${upstream_boost_version}")" -gt "$(ver "${local_boost_tag}")" ]]; then
+          if [[ "${BOOST_ASSETS_FOUND}" == 'false' ]]; then
+            printf "### ⚠️ Skipping Release Mirror\n\n" >> $GITHUB_STEP_SUMMARY
+            printf "A valid GitHub tag **boost-${upstream_boost_version}** was found, but no download assets were available on any of the mirrors.\n\n" >> $GITHUB_STEP_SUMMARY
+            printf "This usually means it is a meta-release or the assets are still being uploaded. The workflow will skip this version for now.\n" >> $GITHUB_STEP_SUMMARY
+            echo "continue_build=no" >> $GITHUB_ENV
+          elif [[ "$(ver "${upstream_boost_version}")" -gt "$(ver "${local_boost_tag}")" ]]; then
             printf "%-14s latest-boost:%-10s mirror-boost:%-10s %s\n" "$iray" "${upstream_boost_version}" "${local_boost_tag}" "< New version available - workflow will be triggered"
             echo "continue_build=yes" >> $GITHUB_ENV
           else
             printf "%-14s latest-boost:%-10s mirror-boost:%-10s\n" "$iray" "${upstream_boost_version}" "${local_boost_tag}"
           fi
 
-          if [[ "${update_latest_release}" == 'true' ]]; then
+          if [[ "${update_latest_release}" == 'true' && "${BOOST_ASSETS_FOUND}" == 'true' ]]; then
             echo "continue_build=yes" >> $GITHUB_ENV
           fi
 
