@@ -65,7 +65,7 @@ jobs:
 
       - name: Docker - Bootstrap the boost files
         id: boost_version_info
-        uses: userdocs/actions/boost@48c6954bd2288aaab8811fc604b7a1c898de5ee5 # v1.0.7
+        uses: userdocs/actions/boost@e8f57bd585c7bb6dcce011694d6772bab657abca # v1.0.7
         with:
           boost_version: ""
           download_archive: false
