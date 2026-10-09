@@ -65,7 +65,7 @@ jobs:
 
       - name: Docker - Bootstrap the boost files
         id: boost_version_info
-        uses: userdocs/actions/boost@e8f57bd585c7bb6dcce011694d6772bab657abca # v1.0.7
+        uses: userdocs/actions/boost@8cf6141527f0fd7b8403fb329907edf8dc2ad75f # v1.0.8
         with:
           boost_version: ""
           download_archive: false
@@ -177,7 +177,7 @@ jobs:
       cancel-in-progress: true
     permissions:
       actions: write
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     env:
       GH_TOKEN: "${{ secrets.AUTO_RERUN || github.token }}"
       github_repo: "" # To use ci-auto-rerun-failed-jobs.yml hosted in a remote repository else default to the current repository. Requires PAT token AUTO_RERUN
