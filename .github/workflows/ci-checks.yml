@@ -18,4 +18,4 @@ jobs:
       security-events: write
     steps:
       - name: Run CI checks
-        uses: userdocs/actions/checks@main # Pin to commit SHA (e.g. @<sha> # v1.0.9) so zizmor unpinned-uses passes
+        uses: userdocs/actions/checks@57abab319e5a509cb7a6ecd331bfe82984acae5f # main
