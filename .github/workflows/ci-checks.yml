@@ -18,4 +18,4 @@ jobs:
       security-events: write
     steps:
       - name: Run CI checks
-        uses: userdocs/actions/checks@57abab319e5a509cb7a6ecd331bfe82984acae5f # main
+        uses: userdocs/actions/checks@bf5340928b69f4294213cf935666da1798bc80c9 # main
