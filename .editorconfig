@@ -19,6 +19,3 @@ indent_size = 2
 [LICENSE.txt]
 indent_style = space
 indent_size = 0
-
-[Jamfile]
-indent_style = tabs

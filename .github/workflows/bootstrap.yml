@@ -1,0 +1,141 @@
+name: boost mirror bootstrap
+
+# credits: https://www.kenmuse.com/blog/dynamic-build-matrices-in-github-actions/
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_binaries:
+        description: "Include binary and all source assets? (Requires secrets.BOOST)"
+        required: true
+        type: boolean
+        default: false
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        type: boolean
+        default: false
+      retries:
+        description: "Number of rerun retries"
+        required: true
+        default: "1"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  bootstrap-matrix:
+    name: bootstrap the matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix-array: ${{ steps.latest-release.outputs.matrix-array }}
+      latest-release: ${{ steps.latest-release.outputs.latest-release }}
+    steps:
+      - name: bootstrap the matrix
+        id: latest-release
+        run: |
+          latest_minor="$(git ls-remote -q -t --refs https://github.com/boostorg/boost.git | awk '$2 ~ /^refs\/tags\/boost-[0-9]+\.[0-9]+\.[0-9]+$/ { sub("refs/tags/boost-", "", $2); print $2 }' | sort -rV | head -n1 | cut -d'.' -f2)"
+          mapfile -t versions < <(seq -f "1.%g.0" 63 "${latest_minor}")
+          echo "latest-release=1.${latest_minor}.0" >> "$GITHUB_OUTPUT"
+          echo "matrix-array=$(jq -cn --args '{version: $ARGS.positional}' "${versions[@]}")" >> "$GITHUB_OUTPUT"
+
+  bootstrap-boost:
+    name: bootstrap boost
+    needs: [bootstrap-matrix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.BOOST || github.token }}
+      GH_REPO: ${{ github.repository }}
+      include_binaries: ${{ inputs.include_binaries }}
+      boost_version: ${{ matrix.version }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.bootstrap-matrix.outputs.matrix-array) }}
+    steps:
+      - name: Download boost assets for ${{ matrix.version }}
+        run: |
+          boost_url="https://archives.boost.io/release/${boost_version}"
+
+          if ! curl -sfLI "${boost_url}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
+            printf "%s\n" "archives.boost.io URL not working for ${boost_version}"
+            exit 1
+          fi
+
+          mkdir -p assets
+          curl_args=()
+
+          if [[ "${include_binaries}" == "true" ]]; then
+            mapfile -t assets_source < <(curl -sL "${boost_url}/source/" | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+            mapfile -t assets_binaries < <(curl -sL "${boost_url}/binaries/" | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+
+            for file in "${assets_source[@]}"; do
+              curl_args+=("${boost_url}/source/${file}" -o "assets/${file}")
+            done
+
+            for file in "${assets_binaries[@]}"; do
+              curl_args+=("${boost_url}/binaries/${file}" -o "assets/${file}")
+            done
+          else
+            for ext in 7z 7z.json tar.bz2 tar.bz2.json tar.gz tar.gz.json zip zip.json; do
+              file="boost_${boost_version//./_}.${ext}"
+              curl_args+=("${boost_url}/source/${file}" -o "assets/${file}")
+            done
+          fi
+
+          curl -sLZ "${curl_args[@]}"
+
+      - name: Create release for ${{ matrix.version }}
+        run: |
+          if ! gh release view "boost-${boost_version}" &> /dev/null; then
+            gh release create "boost-${boost_version}" ./assets/* --title "boost-${boost_version}" --notes "Boost ${boost_version} release mirror"
+          else
+            gh release upload "boost-${boost_version}" ./assets/* --clobber
+          fi
+
+  set-latest-release:
+    name: Set latest release
+    needs: [bootstrap-matrix, bootstrap-boost]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.BOOST || github.token }}
+      GH_REPO: ${{ github.repository }}
+      latest_release: ${{ needs.bootstrap-matrix.outputs.latest-release }}
+    steps:
+      - name: Set boost-${{ needs.bootstrap-matrix.outputs.latest-release }} as latest release
+        run: gh release edit "boost-${latest_release}" --latest
+
+  ci-auto-rerun-failed-jobs:
+    if: failure() && (github.event.inputs.skip_rerun || 'false') == 'false'
+    needs: [bootstrap-matrix, bootstrap-boost, set-latest-release]
+    concurrency:
+      group: ci-auto-rerun-failed-jobs
+      cancel-in-progress: true
+    permissions:
+      actions: write
+    runs-on: ubuntu-26.04-arm
+    env:
+      GH_TOKEN: "${{ secrets.AUTO_RERUN || github.token }}"
+      github_repo: "" # To use ci-auto-rerun-failed-jobs.yml hosted in a remote repository else default to the current repository. Requires PAT token AUTO_RERUN
+      retries: ${{ github.event.inputs.retries || '1' }}
+      distinct_id: ${{ github.event.inputs.distinct_id }}
+    steps:
+      - name: ci-auto-rerun-failed-jobs via ${{ env.github_repo || github.repository }}
+        run: >
+          gh workflow run ci-auto-rerun-failed-jobs-action.yml
+          --repo "${github_repo:-$GITHUB_REPOSITORY}"
+          -f github_repo=${GITHUB_REPOSITORY}
+          -f run_id=${GITHUB_RUN_ID}
+          -f attempts=${GITHUB_RUN_ATTEMPT}
+          -f retries=${retries}
+          -f distinct_id=${distinct_id}

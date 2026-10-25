@@ -1,0 +1,156 @@
+name: check for new boost releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_binaries:
+        description: "Include binary and all source assets? (Requires secrets.BOOST)"
+        required: true
+        type: boolean
+        default: false
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        type: boolean
+        default: true
+      retries:
+        description: "Number of rerun retries"
+        required: true
+        default: "1"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+      update_latest_release:
+        description: "Update latest release?"
+        required: true
+        type: boolean
+        default: false
+  # schedule:
+  #   - cron: "*/30 */1 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  check_release:
+    name: "Check for latest boost tags"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.BOOST || github.token }}
+      GH_REPO: ${{ github.repository }}
+      include_binaries: ${{ inputs.include_binaries || (github.event_name == 'schedule' && vars.INCLUDE_BINARIES == 'true') }}
+      update_latest_release: ${{ inputs.update_latest_release }}
+    steps:
+      - name: Docker - Bootstrap the boost files
+        id: boost_version_info
+        uses: userdocs/actions/boost@8cf6141527f0fd7b8403fb329907edf8dc2ad75f # v1.0.8
+        with:
+          boost_version: ""
+          download_archive: false
+          extract_archive: false
+
+      - name: Check upstream vs local boost tags
+        id: check_tags
+        env:
+          upstream_boost_version: ${{ steps.boost_version_info.outputs.BOOST_VERSION }}
+          BOOST_ASSETS_FOUND: ${{ steps.boost_version_info.outputs.BOOST_ASSETS_FOUND }}
+        run: |
+          ver() {
+            local test_array clean_ver="${1%%[-+]*}"
+            read -ra test_array < <(printf "%s" "${clean_ver//./ }")
+            printf "%d%03d%03d%03d" "${test_array[@]}"
+          }
+
+          local_boost_tag="$(git ls-remote -q -t --refs "https://github.com/${GITHUB_REPOSITORY}.git" | awk '$2 ~ /^refs\/tags\/boost-[0-9]+\.[0-9]+\.[0-9]+$/ { sub("refs/tags/boost-", "", $2); print $2 }' | sort -rV | head -n1)"
+          continue_build="no"
+
+          if [[ "${BOOST_ASSETS_FOUND}" == 'false' ]]; then
+            {
+              printf "### ⚠️ Skipping Release Mirror\n\n"
+              printf "A valid GitHub tag **boost-%s** was found, but no download assets were available on any of the mirrors.\n\n" "${upstream_boost_version}"
+              printf "This usually means it is a meta-release or the assets are still being uploaded. The workflow will skip this version for now.\n"
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$(ver "${upstream_boost_version}")" -gt "$(ver "${local_boost_tag:-0.0.0}")" || "${update_latest_release}" == 'true' ]]; then
+            printf "latest-boost:%-10s mirror-boost:%-10s < New version available - workflow will be triggered\n" "${upstream_boost_version}" "${local_boost_tag:-none}"
+            continue_build="yes"
+          else
+            printf "latest-boost:%-10s mirror-boost:%-10s\n" "${upstream_boost_version}" "${local_boost_tag:-none}"
+          fi
+
+          echo "continue_build=${continue_build}" >> "$GITHUB_OUTPUT"
+
+      - name: Download assets for boost-${{ steps.boost_version_info.outputs.BOOST_VERSION }}
+        if: steps.check_tags.outputs.continue_build == 'yes'
+        env:
+          boost_version: ${{ steps.boost_version_info.outputs.BOOST_VERSION }}
+        run: |
+          boost_url="https://archives.boost.io/release/${boost_version}"
+
+          if ! curl -sfLI "${boost_url}/source/boost_${boost_version//./_}.tar.gz" &> /dev/null; then
+            printf "%s\n" "archives.boost.io URL not working for ${boost_version}"
+            exit 1
+          fi
+
+          mkdir -p assets
+          curl_args=()
+
+          if [[ "${include_binaries}" == "true" ]]; then
+            mapfile -t assets_source < <(curl -sL "${boost_url}/source/" | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+            mapfile -t assets_binaries < <(curl -sL "${boost_url}/binaries/" | sed -rn 's|^<a href="(.+?)">(.*)|\1|p' | sed '/_rc/d' | awk '!/^$/')
+
+            for file in "${assets_source[@]}"; do
+              curl_args+=("${boost_url}/source/${file}" -o "assets/${file}")
+            done
+
+            for file in "${assets_binaries[@]}"; do
+              curl_args+=("${boost_url}/binaries/${file}" -o "assets/${file}")
+            done
+          else
+            for ext in 7z 7z.json tar.bz2 tar.bz2.json tar.gz tar.gz.json zip zip.json; do
+              file="boost_${boost_version//./_}.${ext}"
+              curl_args+=("${boost_url}/source/${file}" -o "assets/${file}")
+            done
+          fi
+
+          curl -sLZ "${curl_args[@]}"
+
+      - name: Create release for ${{ steps.boost_version_info.outputs.BOOST_VERSION }}
+        if: steps.check_tags.outputs.continue_build == 'yes'
+        env:
+          boost_version: ${{ steps.boost_version_info.outputs.BOOST_VERSION }}
+        run: |
+          if ! gh release view "boost-${boost_version}" &> /dev/null; then
+            gh release create "boost-${boost_version}" ./assets/* --title "boost-${boost_version}" --notes "Boost ${boost_version} release mirror" --latest
+          else
+            gh release upload "boost-${boost_version}" ./assets/* --clobber
+            gh release edit "boost-${boost_version}" --latest
+          fi
+
+  ci-auto-rerun-failed-jobs:
+    if: failure() && (github.event.inputs.skip_rerun || 'false') == 'false'
+    needs: [check_release]
+    concurrency:
+      group: ci-auto-rerun-failed-jobs
+      cancel-in-progress: true
+    permissions:
+      actions: write
+    runs-on: ubuntu-26.04-arm
+    env:
+      GH_TOKEN: "${{ secrets.AUTO_RERUN || github.token }}"
+      github_repo: "" # To use ci-auto-rerun-failed-jobs.yml hosted in a remote repository else default to the current repository. Requires PAT token AUTO_RERUN
+      retries: ${{ github.event.inputs.retries || '1' }}
+      distinct_id: ${{ github.event.inputs.distinct_id }}
+    steps:
+      - name: ci-auto-rerun-failed-jobs via ${{ env.github_repo || github.repository }}
+        run: >
+          gh workflow run ci-auto-rerun-failed-jobs-action.yml
+          --repo "${github_repo:-$GITHUB_REPOSITORY}"
+          -f github_repo=${GITHUB_REPOSITORY}
+          -f run_id=${GITHUB_RUN_ID}
+          -f attempts=${GITHUB_RUN_ATTEMPT}
+          -f retries=${retries}
+          -f distinct_id=${distinct_id}

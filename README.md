@@ -1,71 +1,46 @@
 # boost mirror
 
-A boost.org release mirror using Github workflows and the release system. This example repo has bootstrapped the `source` and `binary` folders of the remote with the exception `rc` or non release assets.
+A boost.org release mirror using GitHub workflows and the release system. This repository mirrors the `source` (and optionally `binaries`) folders from `archives.boost.io`, excluding `alpha`, `beta`, and `rc` non-release candidates.
 
 > [!NOTE]
-> This solution aims to be an easy reproducible release mirror so if it's not a release asset we are not interested in it. `alpha`,`beta` and `rc` candidates are not releases.
+> This solution aims to be an easy, reproducible release mirror. `alpha`, `beta`, and `rc` candidates are not mirrored.
 
 ## How it works
 
-There are 2 pairs of workflows that achieve different goals for a mirror repository. Pairs are linked as `source` or `source` and `binary`
+Two workflows handle initial bootstrapping and ongoing release checks:
 
 ```txt
-bootstrap_source.yml (pair 1)
-bootstrap_source_binary.yml (pair 2)
-check_new_release_source.yml (pair 1)
-check_new_release_source_binary.yml (pair 2)
+bootstrap.yml
+check_new_release.yml
 ```
 
-> [!IMPORTANT]
-> The workflows `source` will only get a specific set of boost release source code archives from the remote `source` folders. If you need a header only or source only mirror.
-
-> [!TIP]
-> This is what most projects will be using. The packaged source archives with the headers or used to build the components they need.
-
-> [!NOTE]
-> The `source` workflows work with just the `github.token` and need no special permissions in a newly forked repo
-> It takes just over 60 seconds to bootstrap the releases.
+Both workflows support two modes via the `include_binaries` input (or the `INCLUDE_BINARIES` repository variable for scheduled runs):
 
 > [!IMPORTANT]
-> The workflows `source and binary` will get all files except `alpha`,`beta` and `rc` files from the remote `source` and `binary` folders.
+> **Source only (`include_binaries: false`, default)**
+> Downloads the standard Boost release source archives (`.7z`, `.tar.bz2`, `.tar.gz`, `.zip` and their `.json` checksums) from the remote `source` folder.
+> Works out of the box with the default `github.token` (no extra permissions or PAT needed in a newly forked repo) and takes just over 60 seconds to bootstrap.
 
 > [!CAUTION]
-> The `source` and `binary` workflows will not work with just the `github.token` and need a PAT created with minimal permissions to overcome api rate limiting.
-> It takes just around 5 minutes to bootstrap this and involves some large files.
+> **Source and binaries (`include_binaries: true`)**
+> Downloads all release files (excluding `_rc`) from both the remote `source` and `binaries` folders.
+> Requires a Personal Access Token (PAT) with minimal `contents: write` permissions to avoid API rate limiting (~5 minutes to bootstrap large binary files).
 >
-> In the repository settings, create a repository secret, called `BOOST`, with the token created. The workflows are already prepped to use this `${{ secrets.BOOST }}`
-
-Finally, you have the corresponding automated check release workflows which will create new releases in the same format as the selected bootstrap workflow.
-
-After a repo is bootstrapped we focus on the new releases and will never use that workflow again so it is required to be manually triggered.
+> In your repository settings:
+> 1. Create a repository secret named `BOOST` containing your PAT (`${{ secrets.BOOST }}`).
+> 2. For scheduled runs with binaries, create a repository variable named `INCLUDE_BINARIES` set to `true`.
 
 ## Summary
 
-In Summary, to bootstrap a source only repo:
+To bootstrap and maintain a mirror:
 
-1. The [bootstrap_source.yml](https://github.com/userdocs/boost/blob/main/.github/workflows/bootstrap_source.yml) will determine the latest release and create an array of versions from `1.63.0`, the earliest version hosted on either `boostorg.jfrog.io` or `archives.boost.io`, through to current the latest version.
-2. This will fire a matrix job using that array and download the main assets and upload them as tagged releases, using a tag version that matches the <https://github.com/boostorg/boost/tags> format.
-3. Remote latest release tag will be set as the local latest release tag.
-4. A scheduled [check_new_release_source.yml](https://github.com/userdocs/boost/blob/main/.github/workflows/check_new_release_source.yml) will check for new releases and mirror them as they are released.
+1. Fork the repository and run [bootstrap.yml](.github/workflows/bootstrap.yml) manually (`workflow_dispatch`). It discovers all Boost releases from `1.63.0` to the current latest release on `boostorg/boost`, downloads the assets from `archives.boost.io` in parallel matrix jobs, creates tagged releases (`boost-1.x.0`), and marks the newest version as the latest release.
+2. Enable the `schedule` trigger in [check_new_release.yml](.github/workflows/check_new_release.yml) to automatically poll for and mirror new Boost releases as they become available:
 
-> [!NOTE]
-> Source location redundancy starting with `boostorg.jfrog.io` falling back to `archives.boost.io`
-
-So just fork the repo, run the boost [bootstrap.yml](https://github.com/userdocs/boost/blob/main/.github/workflows/bootstrap_source.yml)
-
-Then edit the paired check release workflow to enable the scheduler.
-
-You now have mirror that will update itself when new releases are available.
-
-## Need to know
-
-> [!WARNING]
-> The scheduled part of the workflows is commented out until you decide which one to use.
->
-> ```
->  # schedule:
->  #   - cron: "*/30 */1 * * *"
-> ```
+```yaml
+  schedule:
+    - cron: "*/30 */1 * * *"
+```
 
 ## Credits
 
