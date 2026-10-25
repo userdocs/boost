@@ -1,72 +1,9 @@
-name: ci - checks
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions: {}
-
 jobs:
-  sh-checker:
+  ci-checks:
     runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run the sh-checker
-        uses: luizm/action-sh-checker@883217215b11c1fabbf00eb1a9a041f62d74c744 # v0.10.0
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          SHELLCHECK_OPTS: -e SC2034,SC1091 # It is possible to exclude some shellcheck warnings.
-          SHFMT_OPTS: -ci -sr -i 0 # It is possible to pass arguments to shftm
-        with:
-          sh_checker_comment: true
-          sh_checker_exclude: ""
-
-  zizmor-checker:
-    runs-on: ubuntu-26.04-arm
-    permissions:
       security-events: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run zizmor 🌈
-        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
-
-  editorconfig-checker:
-    runs-on: ubuntu-26.04-arm
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: editorconfig-checker
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          runner_arch: ${{ runner.arch }}
-        run: |
-          case "${runner_arch}" in
-            X86 | X64)
-              arch="amd64"
-              ;;
-            ARM | ARM64)
-              arch="arm64"
-              ;;
-          esac
-
-          curl -Lo- "https://github.com/editorconfig-checker/editorconfig-checker/releases/latest/download/editorconfig-checker-linux-${arch}.tar.gz" | tar xzf -
-          ./editorconfig-checker --exclude '^(docs/.*|patches/.*)$' | sed 's/\x1b\[[0-9;]*m//g' | { printf '%b\n' '```bash' >> "$GITHUB_STEP_SUMMARY"; tee -a "$GITHUB_STEP_SUMMARY"; printf '%b\n' '```' >> "$GITHUB_STEP_SUMMARY"; }
-          exit_code="${PIPESTATUS[0]}"
-          exit "${exit_code}"
+      - name: Run CI checks
+        uses: userdocs/actions/checks@main
